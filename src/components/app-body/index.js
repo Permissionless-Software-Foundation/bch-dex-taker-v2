@@ -23,6 +23,8 @@ import SlpTokens from './slp-tokens'
 import SweepWif from './sweep/index.js'
 import SignMessage from './sign/index.js'
 import ServerSelectView from './configuration/select-server-view'
+import NostrPost from './nostr/nostr-post.js'
+import NostrRead from './nostr/nostr-read.js'
 
 function AppBody (props) {
   // Dependency injection through props
@@ -43,6 +45,9 @@ function AppBody (props) {
         <Route path='/sweep' element={<SweepWif appData={appData} />} />
         <Route path='/sign' element={<SignMessage appData={appData} />} />
         <Route path='/configuration' element={<ServerSelectView appData={appData} />} />
+        <Route path='/nostr-post' element={<NostrPost appData={appData} />} />
+        <Route path='/nostr-read' element={<NostrRead appData={appData} />} />
+
       </Routes>
       {/** Show in all paths except the servers view */}
       {/* {appData.currentPath !== '/servers' && <SelectServerButton linkTo='/servers' appData={appData} />} */}

@@ -10,6 +10,9 @@ import BchDexLib from 'bch-dex-lib'
 import GistServers from './gist-servers'
 import Nostr from './nostr'
 import P2WDB from 'p2wdb'
+import { base58_to_binary as base58ToBinary } from 'base58-js'
+import { bytesToHex } from '@noble/hashes/utils' // already an installed dependency
+import { getPublicKey } from 'nostr-tools/pure'
 
 class AsyncLoad {
   constructor () {
@@ -59,8 +62,14 @@ class AsyncLoad {
       await wallet.walletInfoPromise
       await wallet.initialize()
       console.log('starting to update wallet state.')
+
+      // Get Nostr key pair from WIF
+      const nostrKeyPair = this.nostrKeyPairFromWIF(wallet.walletInfo.privateKey)
+
+      const walletInfo = wallet.walletInfo
+      walletInfo.nostrKeyPair = nostrKeyPair
       // Update the state of the wallet.
-      appData.updateBchWalletState({ walletObj: wallet.walletInfo, appData })
+      appData.updateBchWalletState({ walletObj: walletInfo, appData })
       console.log('finished updating wallet state.')
       // Save the mnemonic to local storage.
       if (!mnemonic) {
@@ -244,6 +253,27 @@ class AsyncLoad {
     } catch (error) {
       console.error('Error in getP2WDBLib', error)
       throw error
+    }
+  }
+
+  // Get Nostr key pair from WIF
+  nostrKeyPairFromWIF (WIF) {
+    if (!WIF) return
+
+    // Extract the privaty key from the WIF, using this guide:
+    // https://learnmeabitcoin.com/technical/keys/private-key/wif/
+    const wifBuf = base58ToBinary(WIF)
+    const privBuf = wifBuf.slice(1, 33)
+    // console.log('privBuf: ', privBuf)
+
+    const privHex = bytesToHex(privBuf)
+    console.log('BCH & Nostr private key (HEX format): ', privHex)
+
+    const pubHex = getPublicKey(privBuf)
+
+    return {
+      privHex,
+      pubHex
     }
   }
 }

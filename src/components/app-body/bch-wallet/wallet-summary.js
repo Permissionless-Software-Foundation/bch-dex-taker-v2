@@ -3,7 +3,7 @@
 */
 
 // Global npm libraries
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useState } from 'react'
 import { Container, Row, Col, Card } from 'react-bootstrap'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faWallet, faEye, faEyeSlash } from '@fortawesome/free-solid-svg-icons'
@@ -12,9 +12,6 @@ import { faWallet, faEye, faEyeSlash } from '@fortawesome/free-solid-svg-icons'
 // Local libraries
 import './wallet-summary.css'
 import CopyOnClick from './copy-on-click'
-import { getPublicKey } from 'nostr-tools/pure'
-import { base58_to_binary as base58ToBinary } from 'base58-js'
-import { bytesToHex } from '@noble/hashes/utils' // already an installed dependency
 
 function WalletSummary (props) {
   // Props
@@ -28,10 +25,7 @@ function WalletSummary (props) {
   const [blurredPrivateKey, setBlurredPrivateKey] = useState(true)
   const [blurredNostrPrivKey, setBlurredNostrPrivKey] = useState(true)
 
-  const [nostrKeyPair, setNostrKeyPair] = useState({
-    privHex: '',
-    pubHex: ''
-  })
+  const [nostrKeyPair] = useState(bchWalletState.nostrKeyPair)
 
   // Encapsulate component state into an object that can be passed to child functions
   const walletSummaryData = {
@@ -82,30 +76,6 @@ function WalletSummary (props) {
     }
   }
 
-  const nostrKeyPairFromWIF = useCallback((WIF) => {
-    if (!WIF) return
-
-    // Extract the privaty key from the WIF, using this guide:
-    // https://learnmeabitcoin.com/technical/keys/private-key/wif/
-    const wifBuf = base58ToBinary(WIF)
-    const privBuf = wifBuf.slice(1, 33)
-    // console.log('privBuf: ', privBuf)
-
-    const privHex = bytesToHex(privBuf)
-    console.log('BCH & Nostr private key (HEX format): ', privHex)
-
-    const pubHex = getPublicKey(privBuf)
-    console.log('nostrPubKey: ', pubHex)
-
-    return {
-      privHex,
-      pubHex
-    }
-  }, [])
-
-  useEffect(() => {
-    setNostrKeyPair(nostrKeyPairFromWIF(bchWalletState.privateKey))
-  }, [nostrKeyPairFromWIF, bchWalletState])
   return (
     <>
       <Container>

@@ -100,6 +100,20 @@ function NavMenu (props) {
             >
               Configuration
             </NavLink>
+            <NavLink
+              className={currentPath === '/nostr-post' ? 'nav-link-active' : 'nav-link-inactive'}
+              to='/nostr-post'
+              onClick={handleClickEvent}
+            >
+              Nostr Post
+            </NavLink>
+            <NavLink
+              className={currentPath === '/nostr-read' ? 'nav-link-active' : 'nav-link-inactive'}
+              to='/nostr-read'
+              onClick={handleClickEvent}
+            >
+              Nostr Profile
+            </NavLink>
           </Nav>
         </Navbar.Collapse>
       </Navbar>
