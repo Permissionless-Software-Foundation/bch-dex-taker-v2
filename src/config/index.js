@@ -21,13 +21,13 @@ const config = {
   nostrTopic: 'bch-dex-test-topic-02',
 
   // REST API endpoint for Nostr relay interactions (primary interface)
-  nostrRestApiUrl: 'https://nostr-relay-api.psfoundation.info',
+  nostrRestApiUrl: 'https://nostr-relay-api.fullstackcash.net',
   // nostrRestApiUrl: 'http://localhost:5942',
 
   // Legacy relay URLs kept for reference (may be used in tags, but actual connections use REST API)
-  nostrRelay: 'wss://nostr-relay.psfoundation.info',
+  nostrRelay: 'wss://nostr.fullstackcash.net',
   nostrRelays: [
-    'wss://nostr-relay.psfoundation.info',
+    'wss://nostr.fullstackcash.net',
     'wss://nos.lol',
     'wss://relay.damus.io'
   ],
