@@ -12,8 +12,6 @@ import ChatSidebar from './chat-sidebar'
 import ChatMain from './chat-main'
 import config from '../../../config'
 
-// Global variables and constants
-
 function NostrChat (props) {
   const { appData } = props
   const { nostrQueries, bchWalletState, startChannelChat } = appData
@@ -38,16 +36,32 @@ function NostrChat (props) {
 
   const profilesRef = useRef({})
   const dmChannelsRef = useRef([])
+  const groupChannelsRef = useRef(config.chatsId)
+
+  // True if channel id is a known DM peer (not a configured group channel).
+  const isDmChannel = useCallback((ch) => {
+    if (!ch) return false
+    if (groupChannelsRef.current.includes(ch)) return false
+    return dmChannelsRef.current.includes(ch) || !!profilesRef.current[ch]
+  }, [])
+
+  // Close one tracked SSE subscription (single cleanup path).
+  const closeTrackedSubscription = useCallback((subId) => {
+    const subscriptions = subscriptionsRef.current
+    if (subscriptions[subId]) {
+      subscriptions[subId].close()
+      delete subscriptions[subId]
+    }
+  }, [])
 
   // Reset states on change channel
   const onChangeChannel = useCallback((ch) => {
     if (selectedChannel === ch) return
-    const profiles = profilesRef.current
-    setSelectedChannelIsDm(!!profiles[ch])
+    setSelectedChannelIsDm(isDmChannel(ch))
     setMessages([])
     setLoadedMessages(false)
     setSelectedChannel(ch)
-  }, [selectedChannel])
+  }, [selectedChannel, isDmChannel])
 
   // Add a new DM to the list
   const addPrivateMessage = useCallback(async (profile) => {
@@ -55,7 +69,8 @@ function NostrChat (props) {
       const exist = dmChannelsRef.current.find(val => val === profile.pubKey)
       setMessages([])
       setLoadedMessages(false)
-      onChangeChannel(profile.pubKey)
+      setSelectedChannelIsDm(true)
+      setSelectedChannel(profile.pubKey)
       if (exist) return
       setDmChannels(currentChs => {
         let newChs = [...currentChs]
@@ -75,7 +90,7 @@ function NostrChat (props) {
     } catch (error) {
       console.warn(error)
     }
-  }, [onChangeChannel])
+  }, [])
 
   // Define starter chat
   useEffect(() => {
@@ -116,8 +131,6 @@ function NostrChat (props) {
   // Handle read messages
   const onMsgRead = useCallback(async (ev) => {
     try {
-      // console.log('onMsgRead() msg: ', msg)
-
       // Update messages list
       setMessages(current => {
         // ignore existing messages
@@ -161,7 +174,7 @@ function NostrChat (props) {
     } catch (error) {
       console.warn(error)
     }
-  }, [appData, profilesRef])
+  }, [appData])
 
   const decryptMsg = useCallback(async ({ ev, pubKey }) => {
     try {
@@ -185,179 +198,164 @@ function NostrChat (props) {
     }
   }, [appData, onMsgRead])
 
-  // Handle SSE subscription for group channels
+  // Load group history via GET, then SSE for live messages only
   useEffect(() => {
-    // fetch messages when channel selected and channel metadata are loaded
     if (!selectedChannel || !channelsLoaded || selectedChannelIsDm) return
-
-    // wait for deleted chats
     if (!deletedChats || !Array.isArray(deletedChats)) return
 
-    // Create subscription for group channel messages
-    const subId = generateSubId(`group-${selectedChannel}`)
-    const filter = { limit: 10, kinds: [42], '#e': [selectedChannel] }
+    let cancelled = false
+    const subId = generateSubId('group')
 
-    // Track if EOSE has been called
-    let eoseCalled = false
-    let eoseTimeoutId = null
+    const loadGroup = async () => {
+      try {
+        const history = await nostrQueries.getChannelMessages(selectedChannel, 50)
+        if (cancelled) return
 
-    const subscription = restClient.current.createSubscription(subId, filter, {
-      onEvent: (ev) => {
-        console.log('Group post retrieved from REST API', ev.content)
-        const onBlackList = nostrQueries.blackList.find((val) => { return val === ev.pubkey })
-        const isDeleted = deletedChats.find((val) => { return val.eventId === ev.id })
-        if (!onBlackList && !isDeleted) {
-          onMsgRead(ev)
+        for (const ev of history) {
+          const onBlackList = nostrQueries.blackList.find((val) => val === ev.pubkey)
+          const isDeleted = deletedChats.find((val) => val.eventId === ev.id)
+          if (!onBlackList && !isDeleted) {
+            onMsgRead(ev)
+          }
         }
-      },
-      onEose: () => {
-        eoseCalled = true
-        if (eoseTimeoutId) {
-          clearTimeout(eoseTimeoutId)
-          eoseTimeoutId = null
+
+        if (!cancelled) {
+          setLoadedMessages(true)
         }
-        if (!selectedChannelIsDm) {
-          // Use setTimeout to ensure state updates from onEvent callbacks are processed
-          // before setting loadedMessages to true
-          setTimeout(() => {
-            setLoadedMessages(true)
-          }, 100)
+
+        if (cancelled) return
+
+        const newest = history.reduce((max, ev) => Math.max(max, ev.created_at || 0), 0)
+        const liveFilter = {
+          limit: 0,
+          kinds: [42],
+          '#e': [selectedChannel],
+          ...(newest > 0 ? { since: newest } : {})
         }
-      },
-      onClosed: (message) => {
-        console.log('Group channel subscription closed:', message)
-      },
-      onError: (error) => {
-        console.warn('Group channel subscription error:', error)
+
+        const subscription = restClient.current.createSubscription(subId, liveFilter, {
+          onEvent: (ev) => {
+            console.log('Group post retrieved from REST API', ev.content)
+            const onBlackList = nostrQueries.blackList.find((val) => val === ev.pubkey)
+            const isDeleted = deletedChats.find((val) => val.eventId === ev.id)
+            if (!onBlackList && !isDeleted) {
+              onMsgRead(ev)
+            }
+          },
+          onEose: () => {},
+          onClosed: (message) => {
+            console.log('Group channel subscription closed:', message)
+          },
+          onError: (error) => {
+            console.warn('Group channel subscription error:', error)
+          }
+        })
+
+        if (cancelled) {
+          subscription.close()
+          return
+        }
+
+        subscriptionsRef.current[subId] = subscription
+      } catch (error) {
+        console.warn('Error loading group messages:', error)
+        if (!cancelled) setLoadedMessages(true)
       }
-    })
+    }
 
-    subscriptionsRef.current[subId] = subscription
-
-    // Set up EOSE timeout fallback - if EOSE doesn't arrive within 10 seconds, set loadedMessages anyway
-    const EOSE_TIMEOUT_MS = 10000 // 10 seconds
-    eoseTimeoutId = setTimeout(() => {
-      if (!eoseCalled && !selectedChannelIsDm) {
-        console.warn(`EOSE timeout reached for subscription ${subId} - setting loadedMessages to true`)
-        setLoadedMessages(true)
-      }
-    }, EOSE_TIMEOUT_MS)
-
-    // Capture values for cleanup
-    const subscriptionsRefValue = subscriptionsRef.current
-    const restClientValue = restClient.current
+    loadGroup()
 
     return () => {
-      // Clear EOSE timeout if it exists
-      if (eoseTimeoutId) {
-        clearTimeout(eoseTimeoutId)
-      }
-      // Close subscription on component unmount or selected channel changes
+      cancelled = true
       console.log('Close existing subscription for group channel')
-      if (subscriptionsRefValue[subId]) {
-        subscriptionsRefValue[subId].close()
-        delete subscriptionsRefValue[subId]
-      }
-      restClientValue.closeSubscription(subId).catch(err => {
-        // Subscription already closed is not an error - this is expected behavior
-        const errorMessage = err?.message || err?.toString() || ''
-        if (!errorMessage.includes('not found') && !errorMessage.includes('already closed')) {
-          console.warn('Error closing subscription:', err)
-        }
-      })
+      closeTrackedSubscription(subId)
     }
-  }, [onMsgRead, selectedChannel, selectedChannelIsDm, nostrQueries, channelsLoaded, deletedChats])
+  }, [onMsgRead, selectedChannel, selectedChannelIsDm, nostrQueries, channelsLoaded, deletedChats, closeTrackedSubscription])
 
-  // Handle SSE subscription for dm channels
+  // Load DM history via GET, then SSE for live messages only
   useEffect(() => {
-    // fetch messages when channel selected and channel metadata are loaded
-
     if (!selectedChannel || !selectedChannelIsDm) return
 
+    let cancelled = false
     const { nostrKeyPair } = bchWalletState
     const dmPubKey = selectedChannel
+    const subId = generateSubId('dm')
 
-    // Create subscription for DM channel messages
-    const subId = generateSubId(`dm-${dmPubKey}`)
-    // Use array of filters for multiple conditions
-    const filters = [
-      { limit: 10, kinds: [4], '#p': [nostrKeyPair.pubHex], authors: [dmPubKey] }, // received messages
-      { limit: 10, kinds: [4], '#p': [dmPubKey], authors: [nostrKeyPair.pubHex] } // sent messages
-    ]
+    const loadDm = async () => {
+      try {
+        const history = await nostrQueries.getDmMessages(nostrKeyPair.pubHex, dmPubKey, 50)
+        if (cancelled) return
 
-    // Track if EOSE has been called
-    let eoseCalled = false
-    let eoseTimeoutId = null
+        for (const ev of history) {
+          if (ev.pubkey === nostrKeyPair.pubHex) {
+            await decryptMsg({ ev, pubKey: dmPubKey })
+          } else {
+            await decryptMsg({ ev, pubKey: ev.pubkey })
+          }
+        }
 
-    const subscription = restClient.current.createSubscription(subId, filters, {
-      onEvent: (ev) => {
-        console.log('DM post retrieved from REST API', ev.content)
-        // decrypt message
-        if (ev.pubkey === nostrKeyPair.pubHex) {
-          // Sent messages
-          decryptMsg({ ev, pubKey: dmPubKey })
-        } else {
-          // Received messages
-          decryptMsg({ ev, pubKey: ev.pubkey })
+        if (!cancelled) {
+          setLoadedMessages(true)
         }
-      },
-      onEose: () => {
-        eoseCalled = true
-        if (eoseTimeoutId) {
-          clearTimeout(eoseTimeoutId)
-          eoseTimeoutId = null
+
+        if (cancelled) return
+
+        const newest = history.reduce((max, ev) => Math.max(max, ev.created_at || 0), 0)
+        const liveFilters = [
+          {
+            limit: 0,
+            kinds: [4],
+            '#p': [nostrKeyPair.pubHex],
+            authors: [dmPubKey],
+            ...(newest > 0 ? { since: newest } : {})
+          },
+          {
+            limit: 0,
+            kinds: [4],
+            '#p': [dmPubKey],
+            authors: [nostrKeyPair.pubHex],
+            ...(newest > 0 ? { since: newest } : {})
+          }
+        ]
+
+        const subscription = restClient.current.createSubscription(subId, liveFilters, {
+          onEvent: (ev) => {
+            console.log('DM post retrieved from REST API', ev.content)
+            if (ev.pubkey === nostrKeyPair.pubHex) {
+              decryptMsg({ ev, pubKey: dmPubKey })
+            } else {
+              decryptMsg({ ev, pubKey: ev.pubkey })
+            }
+          },
+          onEose: () => {},
+          onClosed: (message) => {
+            console.log('DM channel subscription closed:', message)
+          },
+          onError: (error) => {
+            console.warn('DM channel subscription error:', error)
+          }
+        })
+
+        if (cancelled) {
+          subscription.close()
+          return
         }
-        if (selectedChannelIsDm) {
-          // Use setTimeout to ensure state updates from onEvent callbacks are processed
-          // before setting loadedMessages to true
-          setTimeout(() => {
-            setLoadedMessages(true)
-          }, 100)
-        }
-      },
-      onClosed: (message) => {
-        console.log('DM channel subscription closed:', message)
-      },
-      onError: (error) => {
-        console.warn('DM channel subscription error:', error)
+
+        subscriptionsRef.current[subId] = subscription
+      } catch (error) {
+        console.warn('Error loading DM messages:', error)
+        if (!cancelled) setLoadedMessages(true)
       }
-    })
+    }
 
-    subscriptionsRef.current[subId] = subscription
-
-    // Set up EOSE timeout fallback - if EOSE doesn't arrive within 10 seconds, set loadedMessages anyway
-    const EOSE_TIMEOUT_MS = 10000 // 10 seconds
-    eoseTimeoutId = setTimeout(() => {
-      if (!eoseCalled && selectedChannelIsDm) {
-        console.warn(`EOSE timeout reached for subscription ${subId} - setting loadedMessages to true`)
-        setLoadedMessages(true)
-      }
-    }, EOSE_TIMEOUT_MS)
-
-    // Capture values for cleanup
-    const subscriptionsRefValue = subscriptionsRef.current
-    const restClientValue = restClient.current
+    loadDm()
 
     return () => {
-      // Clear EOSE timeout if it exists
-      if (eoseTimeoutId) {
-        clearTimeout(eoseTimeoutId)
-      }
-      // Close subscription on component unmount or selected channel changes
+      cancelled = true
       console.log('Close existing subscription for private channel')
-      if (subscriptionsRefValue[subId]) {
-        subscriptionsRefValue[subId].close()
-        delete subscriptionsRefValue[subId]
-      }
-      restClientValue.closeSubscription(subId).catch(err => {
-        // Subscription already closed is not an error - this is expected behavior
-        const errorMessage = err?.message || err?.toString() || ''
-        if (!errorMessage.includes('not found') && !errorMessage.includes('already closed')) {
-          console.warn('Error closing subscription:', err)
-        }
-      })
+      closeTrackedSubscription(subId)
     }
-  }, [onMsgRead, selectedChannel, selectedChannelIsDm, nostrQueries, bchWalletState, decryptMsg])
+  }, [selectedChannel, selectedChannelIsDm, nostrQueries, bchWalletState, decryptMsg, closeTrackedSubscription])
 
   const handleIncomingDms = useCallback(async (pubKey) => {
     try {
@@ -400,18 +398,15 @@ function NostrChat (props) {
     const { bchWalletState } = appData
     const { nostrKeyPair } = bchWalletState
 
-    // Create subscription for new incoming DM notifications
     const subId = generateSubId('dm-notify')
-    const filter = { limit: 0, kinds: [4], '#p': [nostrKeyPair.pubHex] } // received messages
+    const filter = { limit: 0, kinds: [4], '#p': [nostrKeyPair.pubHex] }
 
     const subscription = restClient.current.createSubscription(subId, filter, {
       onEvent: (ev) => {
         console.log('New message received from REST API', ev)
         handleIncomingDms(ev.pubkey)
       },
-      onEose: () => {
-        // EOSE received, subscription is active
-      },
+      onEose: () => {},
       onClosed: (message) => {
         console.log('DM notification subscription closed:', message)
       },
@@ -422,26 +417,11 @@ function NostrChat (props) {
 
     subscriptionsRef.current[subId] = subscription
 
-    // Capture values for cleanup
-    const subscriptionsRefValue = subscriptionsRef.current
-    const restClientValue = restClient.current
-
     return () => {
-      // Close subscription on component unmount
       console.log('Close existing subscription for DM notifications')
-      if (subscriptionsRefValue[subId]) {
-        subscriptionsRefValue[subId].close()
-        delete subscriptionsRefValue[subId]
-      }
-      restClientValue.closeSubscription(subId).catch(err => {
-        // Subscription already closed is not an error - this is expected behavior
-        const errorMessage = err?.message || err?.toString() || ''
-        if (!errorMessage.includes('not found') && !errorMessage.includes('already closed')) {
-          console.warn('Error closing subscription:', err)
-        }
-      })
+      closeTrackedSubscription(subId)
     }
-  }, [handleIncomingDms, appData, nostrQueries, dmListLoaded, channelsLoaded])
+  }, [handleIncomingDms, appData, dmListLoaded, channelsLoaded, closeTrackedSubscription])
 
   // Load Dm channels
   useEffect(() => {
@@ -545,6 +525,7 @@ function NostrChat (props) {
               dmListLoaded={dmListLoaded && channelsLoaded}
               onChangeChannel={onChangeChannel}
               addPrivateMessage={addPrivateMessage}
+              onMsgRead={onMsgRead}
               {...props}
             />
           </Col>

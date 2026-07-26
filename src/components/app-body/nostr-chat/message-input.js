@@ -12,7 +12,7 @@ import { hexToBytes } from '@noble/hashes/utils' // already an installed depende
 import NostrRestClient from '../../../services/nostr-rest-client.js'
 
 function MessageInput (props) {
-  const { appData, selectedChannel, profiles } = props
+  const { appData, selectedChannel, profiles, selectedChannelIsDm, onMsgRead } = props
   const { bchWalletState, nostrQueries } = appData
   // Initialize REST client for publishing
   const restClient = new NostrRestClient()
@@ -24,9 +24,11 @@ function MessageInput (props) {
   // Define input type between private or public
   useEffect(() => {
     const dmTo = profiles[selectedChannel]
-    setIsDm(!!dmTo)
-    setDmProfile(dmTo)
-  }, [selectedChannel, profiles])
+    // Prefer explicit DM channel flag; fall back to profile presence
+    const privateChat = selectedChannelIsDm || !!dmTo
+    setIsDm(privateChat)
+    setDmProfile(dmTo || (privateChat ? { pubKey: selectedChannel } : false))
+  }, [selectedChannel, profiles, selectedChannelIsDm])
 
   const handleSubmitPrivate = async (e) => {
     e.preventDefault()
@@ -36,13 +38,15 @@ function MessageInput (props) {
       console.log('dm To : ', dmProfile)
 
       const { nostrKeyPair } = bchWalletState
+      const peerPubKey = dmProfile?.pubKey || selectedChannel
       // Convert private key to binary
       const privateKeyBin = hexToBytes(nostrKeyPair.privHex)
+      const plaintext = message
 
       const encryptedMsg = await nostrQueries.encryptMsg({
         senderPrivKey: nostrKeyPair.privHex,
-        receiverPubKey: dmProfile?.pubKey,
-        message
+        receiverPubKey: peerPubKey,
+        message: plaintext
       })
 
       console.log('encryptedMsg', encryptedMsg)
@@ -50,7 +54,7 @@ function MessageInput (props) {
       const eventTemplate = {
         kind: 4,
         created_at: Math.floor(Date.now() / 1000),
-        tags: [['p', dmProfile.pubKey]],
+        tags: [['p', peerPubKey]],
         content: encryptedMsg
       }
       console.log(`eventTemplate: ${JSON.stringify(eventTemplate, null, 2)}`)
@@ -72,6 +76,14 @@ function MessageInput (props) {
         throw err
       }
 
+      // Show the outbound message immediately (do not wait for SSE echo)
+      if (onMsgRead) {
+        onMsgRead({
+          ...signedEvent,
+          content: plaintext
+        })
+      }
+
       setMessage('')
       setOnFetch(false)
     } catch (error) {
@@ -90,16 +102,14 @@ function MessageInput (props) {
 
       // Convert private key to binary
       const privateKeyBin = hexToBytes(nostrKeyPair.privHex)
-
-      // Relay list
-      // const psf = 'wss://nostr-relay.psfoundation.info'
+      const plaintext = message
 
       // Generate a post.
       const eventTemplate = {
         kind: 42,
         created_at: Math.floor(Date.now() / 1000),
         tags: [['e', selectedChannel, 'root']],
-        content: message
+        content: plaintext
       }
       console.log(`eventTemplate: ${JSON.stringify(eventTemplate, null, 2)}`)
 
@@ -118,6 +128,11 @@ function MessageInput (props) {
       } catch (err) {
         console.warn(`Error publishing message: ${err}`)
         throw err
+      }
+
+      // Show the outbound message immediately
+      if (onMsgRead) {
+        onMsgRead(signedEvent)
       }
 
       setMessage('')

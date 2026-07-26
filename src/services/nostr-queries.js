@@ -279,6 +279,56 @@ export default class NostrQueries {
     }
   }
 
+  /**
+   * Load DM conversation history between myPub and peerPub (kind 4).
+   * Prefer this GET query over SSE for initial history.
+   */
+  async getDmMessages (myPub, peerPub, limit = 50) {
+    try {
+      const subId = generateSubId('dm-hist')
+      const filters = [
+        { limit, kinds: [4], '#p': [myPub], authors: [peerPub] },
+        { limit, kinds: [4], '#p': [peerPub], authors: [myPub] }
+      ]
+
+      let events = await this.restClient.queryEvents(subId, filters)
+
+      events = events.filter((val, i, list) => {
+        const existingIndex = list.findIndex(value => value.id === val.id)
+        return existingIndex === i
+      })
+
+      events.sort((a, b) => a.created_at - b.created_at)
+      return events || []
+    } catch (error) {
+      console.warn(`Error fetching DM messages for ${peerPub}:`, error)
+      return []
+    }
+  }
+
+  /**
+   * Load group channel message history (kind 42).
+   */
+  async getChannelMessages (channelId, limit = 50) {
+    try {
+      const subId = generateSubId('ch-hist')
+      const filter = { limit, kinds: [42], '#e': [channelId] }
+
+      let events = await this.restClient.queryEvents(subId, filter)
+
+      events = events.filter((val, i, list) => {
+        const existingIndex = list.findIndex(value => value.id === val.id)
+        return existingIndex === i
+      })
+
+      events.sort((a, b) => a.created_at - b.created_at)
+      return events || []
+    } catch (error) {
+      console.warn(`Error fetching channel messages for ${channelId}:`, error)
+      return []
+    }
+  }
+
   async encryptMsg (inObj = {}) {
     try {
       const { senderPrivKey, receiverPubKey, message } = inObj
