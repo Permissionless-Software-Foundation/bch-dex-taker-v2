@@ -21,8 +21,9 @@ const config = {
   nostrTopic: 'bch-dex-test-topic-02',
 
   // REST API endpoint for Nostr relay interactions (primary interface)
-  nostrRestApiUrl: 'https://nostr-relay-api.fullstackcash.net',
-  // nostrRestApiUrl: 'http://localhost:5942',
+  nostrRestApiUrl:
+    process.env.REACT_APP_NOSTR_REST_API_URL ||
+    'https://nostr-relay-api.psfoundation.info',
 
   // Legacy relay URLs kept for reference (may be used in tags, but actual connections use REST API)
   nostrRelay: 'wss://nostr.fullstackcash.net',
