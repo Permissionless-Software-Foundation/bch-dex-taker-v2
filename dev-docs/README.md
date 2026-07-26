@@ -1,6 +1,10 @@
 # Developer Docs
 
-This file contains notes taken during software development. These notes may eventually be edited into informaiton that goes into the top-level README, or other documentation.
+This file contains notes taken during software development. These notes may eventually be edited into information that goes into the top-level README, or other documentation.
+
+## Change notes
+
+- [reliable-nostr-dms.md](./reliable-nostr-dms.md) — Why nostr-chat DMs failed to load, and the frontend changes for short subscription IDs, GET history, and chat reliability.
 
 ## Main Features of this App
 

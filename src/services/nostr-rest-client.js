@@ -5,12 +5,39 @@
 import config from '../config/index.js'
 
 /**
- * Generate a unique subscription ID
- * @param {string} prefix - Prefix for the subscription ID
+ * NIP-01 max subscription id length. REST2NOSTR may append a short per-relay
+ * suffix, so keep client ids well under 64.
+ */
+export const MAX_CLIENT_SUB_ID_LENGTH = 48
+
+/**
+ * Generate a unique subscription ID that stays within NIP-01 limits.
+ * Use a short semantic prefix only (e.g. 'dm', 'group', 'profile', 'dm-notify').
+ * Do not embed pubkeys or channel hex — those exceed the 64-char limit.
+ *
+ * @param {string} prefix - Short prefix for the subscription ID
  * @returns {string} Unique subscription ID
  */
 export function generateSubId (prefix = 'sub') {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+  let safePrefix = String(prefix || 'sub')
+
+  // If a caller still passes `dm-${pubkey}` / `group-${channelId}`, drop the hex.
+  const hexMatch = safePrefix.match(/[0-9a-f]{64}/i)
+  if (hexMatch) {
+    const cut = safePrefix.indexOf(hexMatch[0])
+    safePrefix = safePrefix.slice(0, cut).replace(/-+$/, '') || 'sub'
+  }
+
+  safePrefix = safePrefix.slice(0, 20) || 'sub'
+  const timestamp = Date.now().toString(36)
+  const random = Math.random().toString(36).slice(2, 8)
+  let subId = `${safePrefix}-${timestamp}-${random}`
+
+  if (subId.length > MAX_CLIENT_SUB_ID_LENGTH) {
+    subId = subId.slice(0, MAX_CLIENT_SUB_ID_LENGTH)
+  }
+
+  return subId
 }
 
 class NostrRestClient {
@@ -177,12 +204,13 @@ class NostrRestClient {
       }
     }
 
-    // Store subscription for cleanup
+    // Store subscription for cleanup. close() is the single entry point —
+    // it aborts the stream and DELETEs on the server (do not also call
+    // closeSubscription from effect cleanup).
     const subscription = {
       subId,
       abortController,
       close: () => {
-        abortController.abort()
         this.closeSubscription(subId)
       }
     }
