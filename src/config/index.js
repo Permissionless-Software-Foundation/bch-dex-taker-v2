@@ -14,9 +14,9 @@ const config = {
   ghRepo: 'https://github.com/Permissionless-Software-Foundation/bch-dex-taker-v2',
   radicleUrl: 'https://app.radicle.network/seeds/maple.radicle.garden/rad:git:hnrkd5cjwwb5tzx37hq9uqm5ubon7ee468xcy/remotes/hyyycncbn9qzqmobnhjq9rry6t4mbjiadzjoyhaknzxjcz3cxkpfpc',
 
-  // dexServer: 'https://dex-api.fullstack.cash',
+  // dexServer: 'https://dex-api.fullstackcash.net',
   // dexServer: 'http://localhost:5700',
-  dexServer: process.env.REACT_APP_DEX_SERVER || 'https://dex-api.fullstack.cash',
+  dexServer: process.env.REACT_APP_DEX_SERVER || 'https://dex-api.fullstackcash.net',
 
   nostrTopic: 'bch-dex-test-topic-02',
 
@@ -26,9 +26,9 @@ const config = {
     'https://nostr-relay-api.psfoundation.info',
 
   // Legacy relay URLs kept for reference (may be used in tags, but actual connections use REST API)
-  nostrRelay: 'wss://nostr-relay.psfoundation.info',
+  nostrRelay: 'wss://nostr.fullstackcash.net',
   nostrRelays: [
-    'wss://nostr-relay.psfoundation.info',
+    'wss://nostr.fullstackcash.net',
     'wss://nos.lol',
     'wss://relay.damus.io'
   ],
